@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework_simplejwt.token_blacklist',
+
     
     # Third-party apps
     'rest_framework',
@@ -49,6 +50,8 @@ INSTALLED_APPS = [
     'orders',
     'accounts',
     'cart',
+    'audit',
+    'reviews',
 ]
 
 MIDDLEWARE = [

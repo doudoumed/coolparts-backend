@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils.text import slugify
+from django.db.models import Avg 
 
 class Category(models.Model):
     name = models.CharField(max_length=100)
@@ -47,3 +48,10 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name
+    
+    def average_rating(self):
+        result = self.reviews.filter(is_approved=True).aggregate(Avg('rating'))
+        return round(result['rating__avg'] or 0, 1)
+
+    def review_count(self):
+        return self.reviews.filter(is_approved=True).count()

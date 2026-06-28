@@ -1,9 +1,11 @@
+from django.contrib.auth import authenticate
+from django.utils.decorators import method_decorator
+from django_ratelimit.decorators import ratelimit
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import authenticate
 from .serializers import RegisterSerializer, UserSerializer
 
 @api_view(['POST'])
@@ -20,15 +22,32 @@ def register(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
+@ratelimit(key='ip', rate='5/m', method='POST', block=True)
 def login(request):
+    """
+    5 محاولات فقط كل دقيقة لكل IP
+    بعدها يتبلوك تلقائياً
+    """
     username = request.data.get('username')
     password = request.data.get('password')
+
+    if not username or not password:
+        return Response(
+            {'error': 'Username and password required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     user = authenticate(username=username, password=password)
     if user is None:
         return Response(
             {'error': 'Invalid username or password'},
             status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if not user.is_active:
+        return Response(
+            {'error': 'Account is disabled'},
+            status=status.HTTP_403_FORBIDDEN
         )
 
     refresh = RefreshToken.for_user(user)
@@ -46,7 +65,10 @@ def logout(request):
         token.blacklist()
         return Response({'message': 'Logged out successfully'})
     except Exception:
-        return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Invalid token'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -61,3 +83,43 @@ def update_profile(request):
     profile.address = request.data.get('address', profile.address)
     profile.save()
     return Response(UserSerializer(request.user).data)
+
+from audit.utils import log_action
+
+@api_view(['POST'])
+@ratelimit(key='ip', rate='5/m', method='POST', block=True)
+def login(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+
+    user = authenticate(username=username, password=password)
+    if user is None:
+        return Response(
+            {'error': 'Invalid username or password'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    refresh = RefreshToken.for_user(user)
+
+    # سجّل عملية الدخول
+    log_action(request, 'LOGIN', extra_data={'username': username})
+
+    return Response({
+        'user': UserSerializer(user).data,
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+    })
+
+@api_view(['POST'])
+def logout(request):
+    try:
+        refresh_token = request.data.get('refresh')
+        token = RefreshToken(refresh_token)
+        token.blacklist()
+
+        # سجّل عملية الخروج
+        log_action(request, 'LOGOUT')
+
+        return Response({'message': 'Logged out successfully'})
+    except Exception:
+        return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
